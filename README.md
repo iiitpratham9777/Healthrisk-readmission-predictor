@@ -1,9 +1,4 @@
 # 30-Day Hospital Readmission Risk — Full-Stack App
-
-Pratham Gupta · B.Tech CSE (AI & DS), IIIT Manipur
-
-Notebook pipeline turned into a deployable app: **ML training script → FastAPI backend → web frontend**.
-
 ## Structure
 ```
 ml/common.py        data generator + feature engineering (shared by train & serve)
