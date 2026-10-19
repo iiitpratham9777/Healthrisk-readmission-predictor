@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Readmission Risk Predictor</title>
+<style>
+:root{--bg:#f5f7fa;--card:#fff;--tx:#1a2433;--mut:#64748b;--bd:#e2e8f0;--ac:#2563eb;--lo:#16a34a;--mo:#d97706;--hi:#dc2626}
+@media(prefers-color-scheme:dark){:root{--bg:#0f172a;--card:#1e293b;--tx:#e2e8f0;--mut:#94a3b8;--bd:#334155}}
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--tx)}
+header{padding:20px 24px;border-bottom:1px solid var(--bd);background:var(--card)}h1{margin:0;font-size:20px}header p{margin:2px 0 0;color:var(--mut);font-size:13px}
+main{max-width:1100px;margin:20px auto;padding:0 16px;display:grid;gap:16px;grid-template-columns:1.1fr 1fr}
+@media(max-width:800px){main{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:18px}.card h2{margin:0 0 12px;font-size:15px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}label{font-size:12px;color:var(--mut);display:block}
+input,select{width:100%;padding:7px 9px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--tx);font:inherit}
+.chk{display:flex;gap:6px;align-items:center;font-size:13px;color:var(--tx)}.chk input{width:auto}
+button{padding:10px 16px;border:0;border-radius:8px;background:var(--ac);color:#fff;font:inherit;cursor:pointer}button.s{background:var(--bd);color:var(--tx);margin-right:6px}
+.row{margin-top:14px;display:flex;flex-wrap:wrap;gap:6px}
+.big{font-size:44px;font-weight:700;line-height:1}.pill{display:inline-block;padding:2px 10px;border-radius:99px;color:#fff;font-size:13px;margin-left:8px}
+.bar{height:10px;background:var(--bd);border-radius:6px;overflow:hidden;margin:10px 0}.bar>i{display:block;height:100%}
+.drv{display:grid;grid-template-columns:150px 1fr 50px;gap:8px;align-items:center;font-size:12px;margin:5px 0}.drv b{font-weight:500;overflow:hidden;text-overflow:ellipsis}
+.dbar{height:8px;border-radius:4px}table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:5px 6px;border-bottom:1px solid var(--bd);text-align:right}th:first-child,td:first-child{text-align:left}tr.best{font-weight:700}
+.note{font-size:12px;color:var(--mut);margin-top:8px}.err{color:var(--hi);font-size:13px}
+</style></head><body>
+<header><h1>30-Day Readmission Risk Predictor</h1><p>Tuned XGBoost · FastAPI backend · trained on synthetic data — demo only, not for clinical use</p></header>
+<main>
+<section class="card"><h2>Patient admission details</h2><div class="grid" id="form"></div>
+<div class="row"><button id="go">Predict risk</button><button class="s" data-p="low">Low-risk example</button><button class="s" data-p="high">High-risk example</button></div><div id="err" class="err"></div></section>
+<section class="card"><h2>Prediction</h2><div id="res" class="note">Fill the form and press Predict.</div></section>
+<section class="card" style="grid-column:1/-1"><h2>Model comparison (held-out test set)</h2><div style="overflow-x:auto"><table id="cmp"></table></div><div id="info" class="note"></div></section>
+</main>
+<script>
+const F=[["age","Age",65,"n"],["gender","Gender","Female",["Male","Female"]],["length_of_stay","Length of stay (days)",4,"n"],["num_diagnoses","# Diagnoses",5,"n"],["num_procedures","# Procedures",1,"n"],["num_medications","# Medications",8,"n"],["prior_admissions_1yr","Prior admissions (1y)",0,"n"],["prior_ed_visits_1yr","Prior ED visits (1y)",1,"n"],["comorbidity_score","Comorbidity score",2,"n"],["discharge_disposition","Discharge to","Home","D"],["primary_dx_category","Primary diagnosis","Other","X"]];
+const B=[["emergency_admission","Emergency admission"],["abnormal_creatinine","Abnormal creatinine"],["abnormal_hba1c","Abnormal HbA1c"],["abnormal_hemoglobin","Abnormal hemoglobin"]];
+const $=id=>document.getElementById(id),pct=x=>(x*100).toFixed(1)+"%";
+const PRE={low:{age:42,length_of_stay:2,num_diagnoses:3,num_medications:4,prior_admissions_1yr:0,prior_ed_visits_1yr:0,comorbidity_score:0,emergency_admission:0,abnormal_creatinine:0,abnormal_hemoglobin:0,discharge_disposition:"Home"},
+high:{age:81,length_of_stay:11,num_diagnoses:10,num_procedures:3,num_medications:18,prior_admissions_1yr:4,prior_ed_visits_1yr:5,comorbidity_score:6,emergency_admission:1,abnormal_creatinine:1,abnormal_hemoglobin:1,discharge_disposition:"SNF"}};
+async function init(){
+ const meta=await (await fetch("/api/metadata")).json();
+ $("form").innerHTML=F.map(([k,l,d,t])=>{const o=t==="D"?meta.dispositions:t==="X"?meta.dx_categories:Array.isArray(t)?t:null;
+  return `<div><label>${l}</label>`+(o?`<select id="${k}">${o.map(v=>`<option ${v===d?"selected":""}>${v}</option>`).join("")}</select>`:`<input id="${k}" type="number" value="${d}">`)+"</div>"}).join("")
+  +B.map(([k,l])=>`<label class="chk"><input type="checkbox" id="${k}">${l}</label>`).join("");
+ const m=await (await fetch("/api/metrics")).json();
+ const best=m.comparison.length-1;
+ $("cmp").innerHTML="<tr><th>Model</th><th>Accuracy</th><th>Precision</th><th>Recall</th><th>F1</th><th>ROC-AUC</th></tr>"+
+  m.comparison.map((r,i)=>`<tr class="${i===best?"best":""}"><td>${r.model}</td>${["accuracy","precision","recall","f1","roc_auc"].map(k=>`<td>${r[k].toFixed(3)}</td>`).join("")}</tr>`).join("");
+ $("info").textContent=`Dataset: ${m.n_rows.toLocaleString()} synthetic admissions, readmission rate ${pct(m.readmission_rate)}. Tuned model uses an F1-optimised threshold of ${m.threshold.toFixed(2)}; CV ROC-AUC ${m.cv_auc.toFixed(3)}.`;
+}
+function read(){const p={};F.forEach(([k,,,t])=>{const v=$(k).value;p[k]=(t==="n")?Number(v):v});B.forEach(([k])=>p[k]=$(k).checked?1:0);return p}
+function fill(o){for(const k in o){const e=$(k);if(e.type==="checkbox")e.checked=!!o[k];else e.value=o[k]}}
+document.querySelectorAll("[data-p]").forEach(b=>b.onclick=()=>{fill(PRE[b.dataset.p]);$("go").click()});
+$("go").onclick=async()=>{$("err").textContent="";
+ try{const r=await fetch("/api/predict",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(read())});
+  if(!r.ok)throw new Error((await r.json()).detail?.[0]?.msg||"Invalid input");
+  const d=await r.json(),c={High:"var(--hi)",Moderate:"var(--mo)",Low:"var(--lo)"}[d.risk_tier],mx=Math.max(...d.drivers.map(x=>Math.abs(x.impact)));
+  $("res").className="";$("res").innerHTML=`<div><span class="big">${pct(d.probability)}</span><span class="pill" style="background:${c}">${d.risk_tier} risk</span></div>
+  <div class="bar"><i style="width:${d.probability*100}%;background:${c}"></i></div>
+  <div class="note">${d.flagged?"Above":"Below"} the model's flag threshold (${pct(d.threshold)}).</div>
+  <h2 style="margin-top:16px">Top drivers (log-odds impact)</h2>`+d.drivers.map(x=>`<div class="drv"><b title="${x.feature}">${x.feature.replace(/_/g," ")}</b><div><div class="dbar" style="width:${Math.abs(x.impact)/mx*100}%;background:${x.impact>0?"var(--hi)":"var(--lo)"}"></div></div><span>${x.impact>0?"+":""}${x.impact.toFixed(2)}</span></div>`).join("")+`<div class="note">Red raises risk, green lowers it. Scaled features show standardised values.</div>`;
+ }catch(e){$("err").textContent=e.message}};
+init();
+</script></body></html>
